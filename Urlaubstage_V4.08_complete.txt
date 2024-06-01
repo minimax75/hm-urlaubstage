@@ -1,0 +1,325 @@
+! Urlaubstage Script Complete-Version 4.08 (Petrus) - 11.2022
+
+! Changelog 4.08
+! - Bei der autom. Ueberpruefung der Systemvariablen (nur Complete-Script):
+!   Abfrage auf den Typ Werteliste fuer die Systemvariable Nr. 4 ergaenzt.
+
+! Changelog 4.07
+! - Daten, die mehr als 12 Monate in der Zukunft liegen werden ignoriert, da sie fuer die aktuelle Urlaubsermittlung nicht relevant sind
+
+! Changelog 4.06
+! - Berechnung korrigiert, wenn keine Jahreszahl in Zeitraeumen angegeben wurde, die ueber die Jahresgrenze hinweg gehen
+
+! Changelog 4.05
+! - Bug in der Berechnung behoben
+
+! Changelog 4.04
+! - Systemvariablen im Array "sv_holyday" werden jetzt generell auf false gesetzt, wenn keine Daten für Urlaubtage vorhanden sind
+
+! Changelog 4.03:
+! - Bug in der Berechnung behoben, bei Angabe von Zeitraeumen, die ueber die Jahresgrenze hinweg gehen
+
+! Changelog 4.02:
+! - Bug behoben beim zurueckschreiben der Daten in die SV "Urlaubstage", wenn diese vom Typ Werteliste ist
+
+! Changelog 4.01:
+! - SV fuer Urlaubstage kann jetzt vom Typ Werteliste oder Zeichenkette sein
+
+! Changelog 4.0:
+! - Datumsangaben jetzt auch mit Jahr moeglich
+! - Daten muessen nicht mehr chronologisch eingegeben werden
+!   => auch zukuenftige Daten, die z.B. uber das aktuelle Jahr hinausgehen,
+!      koennen an beliebiger Stelle eingefuegt werden
+! - abgelaufene bzw. alte Daten werden automatisch aus dem Datensatz der SV entfernt
+! - Tage bis zum naechsten Urlaub (Option)
+! - Systemvariablen werden bei Bedarf automatisch angelegt
+! - bereits vorhandene Systemvariablen werden bei Bedarf auf den richtigen Typ hin geprueft
+! - Debug Funktion zum testen des Scripts mit einem beliebigen Datum
+!   => Ergebnisse werden nur ausgegeben und nicht in SV geschrieben
+! - Gesamtes Script komplett ueberarbeitet.
+
+! ============================================================================
+! Systemvariable Nr.1 und Nr.2 vom Typ: Logikwert
+! Werte: True = Urlaub ; False = kein Urlaub
+! Name (Default): Urlaub-Heute, Urlaub-Morgen
+! ============================================================================
+  string sv_holyday = "Urlaub-Heute,Urlaub-Morgen";
+
+! ============================================================================
+! Systemvariable Nr.3 vom Typ: Zahl
+! Wertebereich: -1 bis 1000 (-1 : keine Urlaubsdaten vorhanden)
+! Name (Default): Urlaub-Tage-bis
+
+! Hinweis!!! Die Systemvariable ist optional.
+! ============================================================================
+  string sv_count = "Urlaub-Tage-bis";
+
+! ============================================================================
+! Systemvariable Nr.4 vom Typ: Zeichenkette (Default) oder Werteliste
+! Name (Default): Urlaubstage
+! Wert  : beliebiges Datum oder Zeitraum
+! Format: Tag, Monat (1- oder 2-stellig), Jahr (2- oder 4-stellig)
+!         Das Jahr kann, muss aber nicht angegeben werden.
+!         (Bsp. 02.06. oder 2.6.18 oder 2.06.2018 etc.)
+!         Trennzeichen, wenn mehrere Daten angegegebn werden, ist das Semikolon.
+
+!        Bsp. fuer Zeitraeme: 20.12.2018-05.01.2019;1.8.-22.8.
+! ============================================================================
+  string sv_holydays = "Urlaubstage";
+
+! ============================================================================
+! Scriptvariable Nr.1
+! Bedeutung: Definition, ob die vom Benutzer angegebenen Urlaubstage
+!            stets chronologisch geordnet angegeben werden oder nicht.
+! Default  : false
+! Werte    : true  = chronologisch => Pruefung nur bis zum ersten, in der Zukunft
+!                    liegenden Datum => etwas schnellerer Ablauf des Scripts
+!            false = nicht chronologisch => es werden "alle" angegebenen Daten geprueft
+! ============================================================================
+  boolean chrono = false;
+
+! ============================================================================
+! Scriptvariable Nr. 2
+! Bedeutung (b_debug): Zu Testzwecken kann die DEBUG-Funktion aktiviert werden.
+!                      Ausgaben erfolgen ausschliesslich in der Testumgebung
+!                      der WebUI. Systemvariablen werden nicht veraendert!
+! Default : false
+! Werte   : true (Funktion ein) ; false (Funktion aus)
+
+! Scriptvariable Nr. 3
+! Bedeutung (s_today): Ist die DEBUG-Funktion aktiviert, dann wird ausschliesslich
+!                      das angegebene Datum "s_today" als Referenzdatum fuer die
+!                      Ueberpruefungen mit den Urlaubstagen verwendet.
+! Wert  : beliebiges Datum
+! Format: Tag, Monat (1- oder 2-stellig), Jahr (2- oder 4-stellig)
+
+! Scriptvariable Nr. 4
+! Bedeutung (b_CheckSVs): Falls aktiviert, werden die benoetigten Systemvariablen
+!                         automatisch in der CCU angelegt und, sofern bereits
+!                         vorhanden, auf den korrekten Typ hin ueberprueft.
+! Werte   : true (Komfortfunktion ein) ; false (Komfortfunktion aus)
+! Default : false
+! Hinweis : Es ist in der Regel ausreichend, wenn diese Funktion nur bei der
+!           1. Anwendung aktiviert und danach wieder deaktiviert wird.
+! ============================================================================
+  boolean b_debug  = false;
+  string  s_today  = "2021-05-19";
+  boolean b_CheckSVs= false;
+
+! **********************************************************
+! Ab hie Scriptcode - Don't change anything behind this line
+! **********************************************************
+
+! *** SV's anlegen/ueberpruefen
+object svObjects = dom.GetObject(ID_SYSTEM_VARIABLES);
+object svObj; string s_data1;
+if (b_CheckSVs) {
+  ! *** SV-Nr.1 und 2 ueberpruefen
+  foreach(s_data1, sv_holyday.Split(",")) {
+    svObj = svObjects.Get(s_data1);
+    ! ***Wenn SV vorhanden => ValueTyp pruefen
+    if (svObj) {
+        if (svObj.ValueSubType() != istBool) { WriteLine(s_data1 # " : ValueSubTyp wrong!"); quit; }
+        else { if (b_debug) { WriteLine(s_data1 # " : ValueTyp OK!"); } }
+    ! ***andernfalls SV neu anlegen
+    } else {
+        svObj = dom.CreateObject(OT_VARDP);
+        svObjects.Add(svObj.ID());
+        svObj.Name(s_data1);
+        svObj.ValueType(ivtBinary);
+        svObj.ValueSubType(istBool);
+        svObj.ValueName0("kein Urlaub");
+        svObj.ValueName1("Urlaub");
+        svObj.State(false);
+        svObj.DPInfo("Urlaubstag?");
+        svObj.ValueUnit("");
+        dom.RTUpdate(false);
+        if (b_debug) { WriteLine(s_data1 # " : Systemvariable create!"); }
+    }
+  }
+  ! *** SV-Nr.3 ueberpruefen
+  svObj = svObjects.Get(sv_count);
+  ! ***Wenn SV vorhanden => ValueTyp pruefen
+  if (svObj) {
+    if (svObj.ValueType() != ivtFloat) { WriteLine(sv_count # " : ValueTyp wrong!"); quit; }
+    else { if (b_debug) { WriteLine(sv_count # " : ValueTyp OK!"); } }
+
+  ! ***andernfalls SV neu anlegen
+  } else {
+    svObj = dom.CreateObject(OT_VARDP);
+    svObjects.Add(svObj.ID());
+    svObj.Name(sv_count);
+    svObj.ValueType(ivtFloat);
+    svObj.ValueSubType(istGeneric);
+    svObj.DPInfo("Tage bis zum Urlaub");
+    svObj.ValueUnit("");
+    svObj.ValueMin(-1);
+    svObj.ValueMax(1000);
+    svObj.State(-1);
+    svObj.Internal(false);
+    svObj.Visible(true);
+    dom.RTUpdate(false);
+    if (b_debug) { WriteLine(sv_count # " : Systemvariable create!"); }
+  }
+  ! *** SV-Nr.4 ueberpruefen
+  svObj = svObjects.Get(sv_holydays);
+  ! ***Wenn SV vorhanden => ValueTyp pruefen
+  if (svObj) {
+    if ((svObj.ValueType() != ivtString) && (svObj.ValueType() != ivtInteger)) { WriteLine(sv_holydays # " : ValueTyp wrong!"); quit; }
+    else { if (b_debug) { WriteLine(sv_holydays # " : ValueTyp OK!"); } }
+
+  ! ***andernfalls SV neu anlegen
+  } else {
+    svObj = dom.CreateObject(OT_VARDP);
+    svObjects.Add(svObj.ID());
+    svObj.Name(sv_holydays);
+    svObj.ValueType(ivtString);
+    svObj.ValueSubType(istChar8859);
+    svObj.DPInfo("Urlaubstage im Jahr");
+    svObj.ValueUnit("");
+    svObj.State("");
+    svObj.Internal(false);
+    svObj.Visible(true);
+    dom.RTUpdate(false);
+    if (b_debug) { WriteLine(sv_holydays # " : Systemvariable create!"); }
+  }
+}
+
+! *** Objekt definieren und Urlaubsdaten aus der SV holen
+svObj=svObjects.Get(sv_holydays);
+if (svObj){
+  if (svObj.ValueType() == ivtString) {string holydays=svObj.Value();} else {
+    if (svObj.ValueType() == ivtInteger) {string holydays=svObj.ValueList();} else {WriteLine(svObj.Name()#" = Falscher ValueTyp. Script wird beendet!"); quit;}
+  }
+} else {WriteLine(svObj.Name()#" = Object nicht gefunden. Script wird beendet!"); quit;}
+
+! *** Verarbeitung nur erforderlich, wenn Urlaubsdaten vorhanden sind
+if (holydays) {
+  ! *** Scriptvariablen
+  boolean Urlaub_heute=false; boolean Urlaub_morgen=false; boolean pruefung=true;
+  integer i_idx=0; integer i_data; integer i_today; integer i_count=-1; string holyday; string s_idx="";
+
+  ! *** Das aktuelle Jahr
+  if (b_debug) { integer i_jahr=s_today.StrValueByIndex("-",0).ToInteger(); } else { integer i_jahr=system.Date("%Y").ToInteger(); }
+
+  ! *** Schaltjahr (SJ) : (ja/nein)=(1/0)
+  integer SJ=((!i_jahr%400)||((i_jahr%100)&&(!i_jahr%4))).ToInteger();
+
+  ! *** Jahrestag heute (i_today)
+  !     Nur DEBUG, statt: i_today=system.Date(i_today#" 06:00:00").ToTime().Format("%j").ToString(0);
+  if (b_debug){ i_data=s_today.StrValueByIndex("-",1).ToInteger(); i_today=((s_today.StrValueByIndex("-",2).ToInteger()+((489*i_data)/16)-30)-((7+i_data)/10)*(2-SJ));
+  } else {i_today=system.Date("%j").ToInteger();}
+
+  ! *** Jahrestag morgen (i_tomorrow)
+  integer i_tomorrow=1; if(i_today<(365+SJ)){ i_tomorrow=i_today+1; } else { i_tomorrow=366+SJ; }
+
+  ! *** Nur DEBUG: Jahrestage fuer heute und morgen ausgeben
+  if (b_debug) {WriteLine("\n(Jahrestage) Heute: "#i_today#" | Morgen: "#i_tomorrow);}
+
+  ! ***Quelldaten nacheinander einlesen und pruefen
+  foreach(holyday, holydays.Split(";")){ ! Eintrag einlesen
+    if(pruefung){ ! Solange pruefung ok...
+      boolean b_daten=true; boolean b_start=true; boolean b_skip=false; integer i_ende=0; integer i_wert4=SJ;
+      foreach(s_data1, holyday.Split("-")){ ! Bei Zeitraum: Eintraege splitten
+        ! ***Wenn Daten ok => Datum pruefen
+        if(b_daten){ i_data=0; string s_data2;
+          foreach(s_data2, s_data1.Split(".")){
+            ! ***Pruefen ob Tages-/Monatszahl=0 (bei Zahl=0 bzw. wenn keine Zahl) || Tageszahl>31 || Monatszahl>12 => Fehler
+            if((s_data2.ToInteger()==0)||((i_data==0)&&(s_data2.ToInteger()>31))||((i_data==1)&&(s_data2.ToInteger()>12))){b_daten=false;}
+            i_data=i_data+1; ! i_data ist Pos. d. Datumswertes (fuer TT=1 ; MM=2 ; JJ/JJJJ=3)
+          }
+          ! ***Wenn Daten ok => Jahrestag ermitteln
+          if(b_daten){
+            if(i_data==3){ ! Wenn Jahr angegeben wurde...
+              ! Pruefen ob Jahrangabe nur 2-stellig => Jahr 4-stellig formatieren
+              i_data=s_data1.StrValueByIndex(".",2).ToInteger(); if(i_data<1000){i_data=i_data+(100*(i_jahr/100));}
+              ! Wenn Jahr im alten Jahr => Zeitraum ueber Jahresgrenze angegeben => i_start auf Jahresanfang korrigieren
+              if(i_data<i_jahr){s_data1="01.01." # i_jahr.ToString();}
+              ! Wenn Jahr mehr als 12 Monate in der Zukunft liegt, ueberspringen => Daten sind aktuell noch nicht relevant
+              if(i_data>(i_jahr+1)){b_skip=true;} else {
+                ! Wenn Jahr im Folgejahr => Auf Schaltjahr pruefen und Anzahl der Jahrestage des aktuellen Jahres fuer Addition merken
+                if(i_data>i_jahr){i_wert4=((!i_data%400)||((i_data%100)&&(!i_data%4))).ToInteger(); i_data=365+SJ;} else {i_data=0;}
+              }
+            } else {i_data=0;}
+            ! ***Jahrestag berechnen ; Wenn Datum im naechsten Jahr => Jahrestag (Folgejahr) + Anzahl der Jahrestage vom aktuellen Jahr (i_data)
+            i_data=((s_data1.StrValueByIndex(".",0).ToInteger()+((489*s_data1.StrValueByIndex(".",1).ToInteger())/16)-30)-((7+s_data1.StrValueByIndex(".",1).ToInteger())/10)*(2-i_wert4))+i_data;
+            if(b_start){
+              ! ***Berechneten Jahrestag merken (i_start) / Wenn Zeitraum: i_start=Jahrestag Beginn ; i_ende=Jahrestag Ende
+              integer i_start=i_data; b_start=false;
+              ! ***Tage bis zum naechsten Urlaub
+              i_data=i_data-i_today;
+              if((i_data>0)&&((i_count<0)||(i_data<i_count))){i_count=i_data;}
+            } else {
+              i_ende=i_data;
+              ! Pruefen, ob Jahreswechsel stattgefunden hat => notwendig, wenn keine Jahreszahl angegeben wurde
+              if ( (i_ende<i_start) && (i_today>i_ende) ) { i_ende=i_data + 365 + SJ; } ! ...noch kein Jahreswechsel
+              if ( (i_ende<i_start) && (i_today<i_ende) && (i_today<i_start) ) { i_start=1; } ! ...Jahreswechsel => i_start auf Jahresanfang korrigieren
+            }
+          }
+        }
+      }
+      ! *** Wenn bis hier Daten ok => auf Urlaubstag pruefen
+      if ((b_daten) && (!b_skip)){
+        ! *** Wenn kein Zeitraum => Einzelnes Datum
+        if (i_ende==0) {
+          if (b_debug) {WriteLine((i_idx+1).ToString()#". Eintrag: "#holyday#": ("#i_start.ToString()#")");}
+          if (i_today > i_start) { s_idx = s_idx # i_idx.ToString() # ","; } else { ! ***Altes Datum => merken, oder...
+            if (i_today == i_start) { Urlaub_heute = true; i_count=0;} else { ! ...heute Urlaub, oder...
+              if (i_tomorrow == i_start) { Urlaub_morgen = true; if (chrono){pruefung=false;}} else { ! ...morgen Urlaub, oder...
+                if ((i_tomorrow < i_start) && (chrono)){ pruefung=false; } ! ...Datum in der Zukunft? => Nur wenn Werte chronologisch angegeben wurden
+              }
+            }
+          }
+        ! ***andernfalls Zeitraum angegeben
+        } else {
+          if (b_debug) {WriteLine((i_idx+1).ToString()#". Eintrag: "#holyday#": ("#i_start.ToString()#" bis "#i_ende.ToString()#")");}
+          if (i_today > i_ende) { s_idx = s_idx # i_idx.ToString() # ","; } else { ! ***Altes Datum => merken, oder...
+            if ((i_today >= i_start) && (i_today <= i_ende)) { Urlaub_heute = true; i_count=0;} ! ...heute Urlaub und...
+            if ((i_tomorrow >= i_start) && (i_tomorrow <= i_ende)) { Urlaub_morgen = true; if ((chrono) || (Urlaub_heute)) {pruefung=false;}} else { ! ...vlt. auch morgen Urlaub,
+              ! ...oder ausserhalb des Zeitraumes? => Nur wenn Werte chronologisch angegeben wurden
+              if ((i_tomorrow > i_ende) && (chrono)) {pruefung=false;}
+            }
+          }
+        }
+      } else { if(!b_daten){ s_idx = s_idx # i_idx.ToString() # ","; }} ! Datenformat nicht i.O. => Eintrag zum Loeschen merken
+    } ! >>Ende pruefung
+  i_idx=i_idx+1;
+  } ! >>Ende foreach holydays
+
+  ! ***Wenn zu loeschende Daten existieren, dann Daten aus Liste entfernen
+  if (s_idx) {
+    i_data=0; s_data2=""; string s_data3="";
+    ! ***Datum/Zeitraum aus Datensatz holen (holyday)
+    foreach(holyday, holydays.Split(";")) {
+      ! ***Index aus Liste holen...
+      foreach(s_data1, s_idx.Split(",")) {
+        ! ***Wenn Index uebereinstimmt, dann alten Eintrag merken und loeschen
+        if (s_data1){if (s_data1.ToInteger() == i_data) {if (s_data2){s_data2=s_data2#";"#holyday;} else {s_data2=holyday;} holyday=""; }}
+      }
+      ! ***Index erhoehen fuer naechsten Eintrag
+      i_data=i_data+1;
+      ! *** Wenn Datum (holyday) nicht geloescht, dann merken (s_data3)
+      if (holyday){if (s_data3){s_data3=s_data3#";"#holyday;} else {s_data3=holyday;}}
+    }
+    ! *** Neuen Datensatz (s_data3) zurueck in SV schreiben oder ausgeben (DEBUG)
+    if (!b_debug) { if (svObj.ValueType() == ivtString) {svObj.State(s_data3);} else {svObj.ValueList(s_data3); svObj.State(0);} }
+    else { WriteLine("\n(Debug) Es sind alte oder fehlerhafte Daten vorhanden."); WriteLine("(Debug) Daten: "#s_data2); WriteLine("(Debug) Neuer Datensatz: "#s_data3);}
+  }
+
+  ! *** Wenn nicht DEBUG: Ergebnis in SV's schreiben...
+  if (!b_debug) {
+    svObj=svObjects.Get(sv_holyday.StrValueByIndex(",", 0)); if (svObj){svObj.State(Urlaub_heute);}
+    svObj=svObjects.Get(sv_holyday.StrValueByIndex(",", 1)); if (svObj){svObj.State(Urlaub_morgen);}
+    svObj=svObjects.Get(sv_count); if (svObj){svObj.State(i_count);}
+  ! *** ...andernfalls Ergebnis nur ausgeben
+  } else {
+    if (Urlaub_heute) { WriteLine("\n(Debug) Heute : Urlaub"); } else { WriteLine("\n(Debug) Heute : Kein Urlaub"); }
+    if (Urlaub_morgen) { WriteLine("(Debug) Morgen: Urlaub"); } else { WriteLine("(Debug) Morgen: Kein Urlaub"); }
+    WriteLine("(Debug) Tage bis Urlaub: "#i_count.ToString());
+  }
+} else {
+  if (b_debug) { WriteLine("Keine Urlaubsdaten vorhanden. Script beendet"); }
+  svObj=svObjects.Get(sv_holyday.StrValueByIndex(",", 0)); if (svObj){svObj.State(false);}
+  svObj=svObjects.Get(sv_holyday.StrValueByIndex(",", 1)); if (svObj){svObj.State(false);}
+  svObj=svObjects.Get(sv_count); if (svObj){svObj.State(-1);}
+}
