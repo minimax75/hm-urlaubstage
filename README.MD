@@ -1,6 +1,6 @@
 Script-Source: https://homematic-forum.de/forum/viewtopic.php?f=31&t=4058&hilit=feiertag#p23994
 
-# Einrichtung Skript Urlaubstage: (ab Version 4)
+# Einrichtung Skript Urlaubstage (ab Version 4)
 
 1. Gehe in der CCU unter "Programme und Verknüpfungen" -> "Programme und Zentralenverknüpfungen" und erstelle ein neues Programm mit der Bedingung, dass dieses 1x täglich (z.B. um 0:01Uhr) ausgeführt wird.
 2. Unter Aktivität füge das **Urlaubstage-Complete** Skript ein und setze in den Zeilen 89 und 91 die Systemvariablen **b_debug** und **b_CheckSVs** jeweils auf true und klicke dann einmal auf "Ausführen". Im Ausgabefenster erhälst du nun die Bestätigung, dass die benötigten Systemvariablen automatisch angelegt wurden.
